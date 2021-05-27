@@ -1,0 +1,58 @@
+name: 'Terraform Apply'
+on:
+  push:
+    branches:
+      - master
+
+env:
+  NEW_RELIC_ACCOUNT_ID: ${{ secrets.NEW_RELIC_ACCOUNT_ID_AIM }}
+  NEW_RELIC_API_KEY: ${{ secrets.NEW_RELIC_API_KEY_GH_ACTIONS }}
+  NEW_RELIC_REGION: ${{ secrets.NEW_RELIC_REGION }}
+
+jobs:
+  Terraform-apply:
+    name: "Terraform Apply"
+    runs-on: ubuntu-latest
+    steps:
+      #----------------------------- Setup -------------------------------#
+      # Checkout the code
+      # Marketplace: https://github.com/marketplace/actions/checkout
+      - name: Setup - Checkout
+        uses: actions/checkout@v2.1.0
+
+
+      # Configure AWS credential environment variables for use in other GitHub Actions.
+      # https://github.com/aws-actions/configure-aws-credentials
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
+          aws-region: us-east-1
+
+      # Downloads a specific version of Terraform CLI and adds it to PATH
+      # Marketplace: https://github.com/marketplace/actions/hashicorp-setup-terraform
+      - name: Setup - Terraform CLI
+        uses: hashicorp/setup-terraform@v1
+
+      #----------------------------- Action -------------------------------#
+      # SSH Keys are setup here because we have terraform modules being referenced via git in
+      # private github repos
+      - name: Terraform Init
+        id: init
+        run: terraform init -input=false
+        env:
+          GIT_SSH_COMMAND: "echo '${{ secrets.GH_SREBOT_SSH }}' > id_rsa
+          && ssh-keyscan github.com > known_hosts
+          && chmod 600 id_rsa known_hosts
+          && ssh -i ./id_rsa -o UserKnownHostsFile=./known_hosts"
+
+      # Auto-approve prevents the requirement of human interaction
+      - name: Terraform Apply
+        if: github.ref == 'refs/heads/master'
+        run: terraform apply -input=false -auto-approve
+        env:
+          GIT_SSH_COMMAND: "echo '${{ secrets.GH_SREBOT_SSH }}' > id_rsa
+          && ssh-keyscan github.com > known_hosts
+          && chmod 600 id_rsa known_hosts
+          && ssh -i ./id_rsa -o UserKnownHostsFile=./known_hosts"
