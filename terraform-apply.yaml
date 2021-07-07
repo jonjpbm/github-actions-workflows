@@ -4,11 +4,6 @@ on:
     branches:
       - master
 
-env:
-  NEW_RELIC_ACCOUNT_ID: ${{ secrets.NEW_RELIC_ACCOUNT_ID_AIM }}
-  NEW_RELIC_API_KEY: ${{ secrets.NEW_RELIC_API_KEY_GH_ACTIONS }}
-  NEW_RELIC_REGION: ${{ secrets.NEW_RELIC_REGION }}
-
 jobs:
   Terraform-apply:
     name: "Terraform Apply"
@@ -20,14 +15,11 @@ jobs:
       - name: Setup - Checkout
         uses: actions/checkout@v2.1.0
 
-
       # Configure AWS credential environment variables for use in other GitHub Actions.
       # https://github.com/aws-actions/configure-aws-credentials
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v1
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
           aws-region: us-east-1
 
       # Downloads a specific version of Terraform CLI and adds it to PATH
@@ -35,24 +27,50 @@ jobs:
       - name: Setup - Terraform CLI
         uses: hashicorp/setup-terraform@v1
 
-      #----------------------------- Action -------------------------------#
-      # SSH Keys are setup here because we have terraform modules being referenced via git in
-      # private github repos
-      - name: Terraform Init
-        id: init
-        run: terraform init -input=false
-        env:
-          GIT_SSH_COMMAND: "echo '${{ secrets.GH_SREBOT_SSH }}' > id_rsa
-          && ssh-keyscan github.com > known_hosts
-          && chmod 600 id_rsa known_hosts
-          && ssh -i ./id_rsa -o UserKnownHostsFile=./known_hosts"
+      #https://github.com/dorny/paths-filter
+      - name: "Path Filter"
+        uses: dorny/paths-filter@v2.2.1
+        id: filter
+        with:
+          filters: |
+            dev:
+              - 'dev/**'
+            prod:
+              - 'prod/**'
 
-      # Auto-approve prevents the requirement of human interaction
-      - name: Terraform Apply
-        if: github.ref == 'refs/heads/master'
-        run: terraform apply -input=false -auto-approve
+      #----------------------------- Action -------------------------------#
+      # Terraform init in prod folder
+      - name: Terraform Init prod
+        id: init_prod
+        if: steps.filter.outputs.prod == 'true'
+        run: cd prod && terraform init -input=false
         env:
-          GIT_SSH_COMMAND: "echo '${{ secrets.GH_SREBOT_SSH }}' > id_rsa
-          && ssh-keyscan github.com > known_hosts
-          && chmod 600 id_rsa known_hosts
-          && ssh -i ./id_rsa -o UserKnownHostsFile=./known_hosts"
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_GHA_NAMEOFREPO_PROD }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_KEY_GHA_NAMEOFREPO_PROD }}
+
+      # Terraform init in dev folder
+      - name: Terraform Init dev
+        id: init_dev
+        if: steps.filter.outputs.dev == 'true'
+        run: cd dev && terraform init -input=false
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_GHA_NAMEOFREPO_NONPROD}}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_KEY_GHA_NAMEOFREPO_NONPROD }}
+
+      # Terraform apply in prod folder
+      # Auto-approve prevents the requirement of human interaction
+      - name: Terraform Apply Prod
+        if: github.ref == 'refs/heads/master' && steps.filter.outputs.prod == 'true'
+        run: cd prod && terraform apply -input=false -auto-approve
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_GHA_NAMEOFREPO_PROD }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_KEY_GHA_NAMEOFREPO_PROD }}
+
+      # Terraform apply in dev folder
+      # Auto-approve prevents the requirement of human interaction
+      - name: Terraform Apply Dev
+        if: github.ref == 'refs/heads/master' && steps.filter.outputs.dev == 'true'
+        run: cd dev && terraform apply -input=false -auto-approve
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_GHA_NAMEOFREPO_NONPROD}}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_KEY_GHA_NAMEOFREPO_NONPROD }}
